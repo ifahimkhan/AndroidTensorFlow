@@ -13,6 +13,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.fahim.androidtensorflow.databinding.ActivityMainBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.task.vision.classifier.Classifications
 import org.tensorflow.lite.task.vision.classifier.ImageClassifier
@@ -96,26 +100,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupTensorFlowLite() {
-        try {
-            loadLabels()
-            // Ensure the model file is in your assets folder
-            val options = ImageClassifier.ImageClassifierOptions.builder()
-                .setMaxResults(3) // Optional
-                .setScoreThreshold(0.3f) // Optional
-                .build()
-            imageClassifier = ImageClassifier.createFromFileAndOptions(
-                this,      // Context
-                "mobilenet_quant_v1_224.tflite", // Replace with your model name in assets
-                options
-            )
-            // Now you can use the imageClassifier
-            Log.d("MainActivity", "ImageClassifier initialized successfully")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                loadLabels() // This also runs on a background thread if it involves I/O
+                val options = ImageClassifier.ImageClassifierOptions.builder()
+                    .setMaxResults(3) // Optional
+                    .setScoreThreshold(0.3f) // Optional
+                    .build()
+                imageClassifier = ImageClassifier.createFromFileAndOptions(
+                    this@MainActivity,      // Context
+                    "mobilenet_quant_v1_224.tflite", // Replace with your model name in assets
+                    options
+                )
+                // Now you can use the imageClassifier
+                Log.d("MainActivity", "ImageClassifier initialized successfully")
 
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error initializing ImageClassifier", e)
-            // Handle error: show a Toast, disable features, etc.
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error initializing ImageClassifier", e)
+                // Handle error: show a Toast, disable features, etc.
+                // Make sure to update UI on the main thread if needed
+                CoroutineScope(Dispatchers.Main).launch {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Error initializing TFLite",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
-
     }
 
     private fun checkPermissions() {
@@ -202,45 +214,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun detectObjects(bitmap: Bitmap) {
-        if (!::imageClassifier.isInitialized) {
-            binding.tvResults.text = "Object detector not initialized"
-            return
-        }
-
-        try {
-            // Create TensorImage from bitmap
-            val tensorImage = TensorImage.fromBitmap(bitmap)
-
-            // Run inference
-            val results = imageClassifier.classify(tensorImage)
-            displayResults(results)
-
-        } catch (e: Exception) {
-            binding.tvResults.text = "Error during detection: ${e.message}"
-        }
-    }
-
-    private fun displayResults(results: List<Classifications>) {
-        if (results.isEmpty()) {
-            binding.tvResults.text = "No classification results"
-            return
-        }
-
-        val resultText = StringBuilder()
-        results.forEach { classification ->
-            classification.categories.forEach { category ->
-                val labelIndex = category.index
-                val labelName = if (labelIndex < labels.size) {
-                    labels[labelIndex]
-                } else {
-                    "Unknown (${category.label})"
+        CoroutineScope(Dispatchers.Default).launch {
+            if (!::imageClassifier.isInitialized) {
+                withContext(Dispatchers.Main) {
+                    binding.tvResults.text = "Object detector not initialized"
                 }
+                return@launch
+            }
 
-                val confidence = category.score * 100
-                resultText.append("$labelName: ${String.format("%.2f", confidence)}%\n")
+            try {
+                // Create TensorImage from bitmap
+                val tensorImage = TensorImage.fromBitmap(bitmap)
+
+                // Run inference
+                val results = imageClassifier.classify(tensorImage)
+
+                displayResults(results)
+
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    binding.tvResults.text = "Error during detection: ${e.message}"
+                }
             }
         }
+    }
 
-        binding.tvResults.text = resultText.toString()
+    private suspend fun displayResults(results: List<Classifications>) {
+        val resultText = StringBuilder()
+        if (results.isNotEmpty()) {
+            results.forEach { classification ->
+                classification.categories.forEach { category ->
+                    val labelIndex = category.index
+                    val labelName = if (labelIndex < labels.size) {
+                        labels[labelIndex]
+                    } else {
+                        "Unknown (${category.label})"
+                    }
+
+                    val confidence = category.score * 100
+                    resultText.append("$labelName: ${String.format("%.2f", confidence)}%\n")
+                }
+            }
+        } else {
+            resultText.append("No classification results")
+        }
+
+        withContext(Dispatchers.Main) { // Switch back to Main thread to update UI
+            binding.tvResults.text = resultText.toString()
+        }
+
     }
 }
+
+
