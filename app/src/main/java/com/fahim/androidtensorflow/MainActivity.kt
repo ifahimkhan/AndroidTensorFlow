@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupTensorFlowLite()
+        setupTensorFlowLite()//ML Layer
         checkPermissions()
         setupClickListeners()
     }
@@ -102,11 +102,16 @@ class MainActivity : AppCompatActivity() {
     private fun setupTensorFlowLite() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                withContext(Dispatchers.Main){
+
+                    binding.tvResults.text = "Loading Labels"
+                }
                 loadLabels() // This also runs on a background thread if it involves I/O
                 val options = ImageClassifier.ImageClassifierOptions.builder()
                     .setMaxResults(3) // Optional
                     .setScoreThreshold(0.3f) // Optional
                     .build()
+
                 imageClassifier = ImageClassifier.createFromFileAndOptions(
                     this@MainActivity,      // Context
                     "mobilenet_quant_v1_224.tflite", // Replace with your model name in assets
